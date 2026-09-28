@@ -1,0 +1,13 @@
+defaults:
+  - data: visage_ambisonics
+  - optimizer: adamW
+  - trainer: default_trainer
+  - patching: frame
+  - routea: ce_target
+  - model_architecture: jepa 
+
+
+model: GRAM-T
+model_size: base
+save_dir: /projects/0/prjs1261
+seed: 42

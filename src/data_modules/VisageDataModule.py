@@ -1,0 +1,64 @@
+import torch.multiprocessing
+from torch.utils.data import DataLoader
+import pytorch_lightning as pl
+import webdataset as wds
+
+from .dataset_functions import pre_process_audio_visage
+
+
+class ViSageDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        base_data_dir: str,
+        batch_size: int = 128,
+        sr: int = 32000,
+        native_sr: int = 48000,
+        num_workers: int = 16,
+        prefetch_factor: int = 2,
+        **kwargs,
+    ):
+        super().__init__()
+        self.datapath = base_data_dir
+        self.batch_size = batch_size
+        self.sr = sr
+        self.native_sr = native_sr
+        self.num_workers = num_workers
+        self.prefetch_factor = prefetch_factor
+        self.audio_train = None
+
+    def _augment_sample(self, sample):
+        audio, audio_sr = sample[0]
+        audio = pre_process_audio_visage(audio, audio_sr, self.native_sr)
+        return (audio,)
+
+    def make_web_dataset(self, path: str):
+        return (
+            wds.WebDataset(
+                path,
+                resampled=True,
+                nodesplitter=wds.shardlists.split_by_node,
+                workersplitter=wds.shardlists.split_by_worker,
+            )
+            .repeat()
+            .shuffle(300)
+            .decode(wds.torch_audio, handler=wds.warn_and_continue)
+            .to_tuple("flac")
+            .map(self._augment_sample)
+            .batched(self.batch_size, partial=False)
+        )
+
+    def setup(self, stage: str):
+        if stage == "fit":
+            self.audio_train = self.make_web_dataset(self.datapath)
+
+    def train_dataloader(self):
+        loader_kwargs = dict(
+            dataset=self.audio_train,
+            batch_size=None,
+            pin_memory=True,
+            num_workers=self.num_workers,
+        )
+        if self.num_workers > 0:
+            loader_kwargs["prefetch_factor"] = self.prefetch_factor
+            loader_kwargs["persistent_workers"] = True
+        return DataLoader(**loader_kwargs)
